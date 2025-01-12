@@ -47,8 +47,6 @@ var (
 	userColorMaps        = []int{1, 21, 5, 11, 10, 2, 13, 16, 17, 19, 20}
 	currentColorMap      = 0
 	currentColormapLabel = colormaps[userColorMaps[currentColorMap]]
-	videoWriter          *gocv.VideoWriter
-	recording            = false
 	recTime              time.Time
 	thermalPadding       = 10
 	tempConv             = true
@@ -90,6 +88,8 @@ func getTempAt(x, y int, mat *gocv.Mat) string {
 }
 
 func main() {
+	videoWriter := &gocv.VideoWriter{}
+	recording := false
 	scale := 2
 	crosshairSize := 5
 	crosshairColor := elementColors["red"]
@@ -107,12 +107,12 @@ func main() {
 	webcam.Set(gocv.VideoCaptureConvertRGB, 0) // do not convert format
 	window := gocv.NewWindow("Thermal")
 	defer window.Close()
-	img := gocv.NewMatWithSize(384, 192, gocv.MatTypeCV16UC2)
+	img := gocv.NewMat()
 	defer img.Close()
 	window.ResizeWindow(256*scale, 192*scale)
 	fmt.Println(`keymap:
 	z x | scale image - + 
-    b n | thermal area - +
+	b n | thermal area - +
 	 l  | toggle temp conversion
 	 c  | toggle crosshair
 	 h  | toggle high low Points
@@ -129,14 +129,15 @@ func main() {
 		if img.Empty() {
 			continue
 		}
-		top := img.Region(image.Rect(0, 0, 256, 191))
+		top := img.Region(image.Rect(0, 0, 256, 192))
 		thermalMat := img.Region(image.Rect(0, 192, 256, 384))
-		topBGR := gocv.NewMatWithSize(192, 256, gocv.MatTypeCV8UC3)
+		topBGR := gocv.NewMat()
 		defer topBGR.Close()
 		gocv.CvtColor(top, &topBGR, gocv.ColorYUVToBGRYVYU)
 		defer top.Close()
 		gocv.ApplyColorMap(topBGR, &topBGR, gocv.ColormapTypes(userColorMaps[currentColorMap]))
 		gocv.Resize(topBGR, &topBGR, image.Point{X: 256 * scale, Y: 192 * scale}, 0, 0, gocv.InterpolationCubic)
+		window.ResizeWindow(256*scale, 192*scale)
 		if crosshair {
 			// draw crosshair
 			gocv.Line(&topBGR, image.Point{X: ((256 / 2) - crosshairSize) * scale, Y: (192 / 2) * scale}, image.Point{X: ((256 / 2) + crosshairSize) * scale, Y: (192 / 2) * scale}, crosshairColor, 1)
@@ -178,8 +179,7 @@ func main() {
 			gocv.PutText(&topBGR, fmt.Sprintf("REC:%v", formattedElapsed), image.Point{X: (256 * scale) - 70, Y: 10}, gocv.FontHersheySimplex, 0.3, elementColors["black"], 2)
 			gocv.PutText(&topBGR, fmt.Sprintf("REC:%v", formattedElapsed), image.Point{X: (256 * scale) - 70, Y: 10}, gocv.FontHersheySimplex, 0.3, elementColors["white"], 1)
 			if err := videoWriter.Write(topBGR); err != nil {
-				log.Fatalf("Error writing image data: %v", err)
-				return
+				log.Printf("Error writing image data: %v", err)
 			}
 		}
 		window.IMShow(topBGR)
@@ -200,12 +200,12 @@ func main() {
 			case 104: // h
 				highLowToggle = !highLowToggle
 			case 120: // x
-				scale++
-				window.ResizeWindow(256*scale, 192*scale)
+				if !recording {
+					scale++
+				}
 			case 122: // z
-				if scale > 1 {
+				if scale > 1 && !recording {
 					scale--
-					window.ResizeWindow(256*scale, 192*scale)
 				}
 			case 112: // p
 				imageFilename := fmt.Sprintf("Thermal-%s.png", strings.Replace(time.Now().Format(time.Stamp), " ", "_", -1))
@@ -214,7 +214,7 @@ func main() {
 			case 114: // r
 				if !recording {
 					videoFilename := fmt.Sprintf("Thermal-%s.avi", strings.Replace(time.Now().Format(time.Stamp), " ", "_", -1))
-					if videoWriter, err = gocv.VideoWriterFile(videoFilename, "MJPG", 25, topBGR.Cols(), topBGR.Rows(), true); err != nil {
+					if videoWriter, err = gocv.VideoWriterFile(videoFilename, "MJPG", 25, topBGR.Cols()*scale, topBGR.Rows()*scale, true); err != nil {
 						fmt.Printf("Error creating video writer: %v\n", err)
 					}
 					recTime = time.Now()

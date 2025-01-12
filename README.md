@@ -8,22 +8,30 @@ recreating the functionality of -> https://github.com/leswright1977/PyThermalCam
 * take images
 * take videos
 * center pixel temp
+* high low temp points
 
-![capture](.git-assets/capture.png)
+![capture](.git-assets/capture-0.png)
 
 ## keymap
 ```shell
 keymap:
-        + - | scale image
-         c  | toggle temp conversion
-         h  | toggle hud
+        z x | scale image - + 
+        b n | thermal area - +
+         l  | toggle temp conversion
+         c  | toggle crosshair
+         h  | toggle high low Points
          m  | cycle through colormaps
-         p  | save frame to file
+         p  | save frame to PNG file
         r t | record / stop
          q  | quit
+
 ```
 
 ## Args
 ```shell
     -d   device int
 ```
+
+## bugs
+
+* randomly seg faults on start up, LOL
