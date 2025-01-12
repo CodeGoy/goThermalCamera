@@ -13,21 +13,88 @@ import (
 )
 
 var (
-	colormaps       = []gocv.ColormapTypes{gocv.ColormapBone, gocv.ColormapJet, gocv.ColormapWinter, gocv.ColormapRainbow, gocv.ColormapOcean, gocv.ColormapSummer, gocv.ColormapSpring, gocv.ColormapCool, gocv.ColormapPink, gocv.ColormapHot, gocv.ColormapParula, gocv.ColormapAutumn}
-	ccm             = 0
-	currentColormap = colormaps[0]
-	hud             = false
-	videoWriter     *gocv.VideoWriter
-	recording       = false
-	recTime         time.Time
+	elementColors = map[string]color.RGBA{
+		"red":   {255, 0, 0, 255},
+		"green": {0, 255, 0, 255},
+		"blue":  {0, 0, 255, 255},
+		"black": {0, 0, 0, 255},
+		"white": {255, 255, 255, 255},
+	}
+	colormaps = map[int]string{
+		0:  "AUTUMN",           // X
+		1:  "BONE",             // v-
+		2:  "JET",              // v-
+		3:  "WINTER",           // x
+		4:  "RAINBOW",          // x
+		5:  "OCEAN",            // v-
+		6:  "SUMMER",           // x
+		7:  "SPRING",           // x
+		8:  "COOL",             // x
+		9:  "HSV",              // x
+		10: "PINK",             // v-
+		11: "HOT",              // v-
+		12: "PARULA",           // x
+		13: "MAGMA",            // v-
+		14: "INFERNO",          // v-
+		15: "PLASMA",           // x
+		16: "VIRIDIS",          // v-
+		17: "CIVIDIS",          // v-
+		18: "TWILIGHT",         // x
+		19: "TWILIGHT_SHIFTED", // v-
+		20: "TURBO",            // v-
+		21: "DEEPGREEN",        // v-
+	}
+	userColorMaps        = []int{1, 21, 5, 11, 10, 2, 13, 16, 17, 19, 20}
+	currentColorMap      = 0
+	currentColormapLabel = colormaps[userColorMaps[currentColorMap]]
+	videoWriter          *gocv.VideoWriter
+	recording            = false
+	recTime              time.Time
+	thermalPadding       = 10
+	tempConv             = true
+	highLowToggle        = false
+	info                 = false
 )
+
+func getHighLow(mat *gocv.Mat) (lX, lY, hX, hY int) {
+	var highestValue int16 = 0
+	var lowestValue int16 = 32767
+	for x := thermalPadding; x < 192-thermalPadding; x++ {
+		for y := thermalPadding; y < 256-thermalPadding; y++ {
+			pixelValue := mat.GetShortAt(x, y)
+			if pixelValue < lowestValue {
+				lowestValue = pixelValue
+				lX = x
+				lY = y
+			}
+			if pixelValue > highestValue {
+				highestValue = pixelValue
+				hX = x
+				hY = y
+			}
+		}
+	}
+	return lX, lY, hX, hY
+}
+
+func getTempAt(x, y int, mat *gocv.Mat) string {
+	vecShort0 := mat.GetShortAt3(y, x, 0)
+	vecShort1 := mat.GetShortAt3(y, x, 1)
+	cTemp := (((float64(vecShort0) + float64(vecShort1)) / 2) / 64) - 273.15
+	if tempConv {
+		return fmt.Sprintf("%.2f %s", (cTemp*9/5)+32, " F")
+
+	}
+	return fmt.Sprintf("%.2f %s", cTemp, " C")
+
+}
 
 func main() {
 	scale := 2
+	crosshairSize := 5
+	crosshairColor := elementColors["red"]
 	var deviceID int
-	var vTemp float64
-	var tempLabel string
-	var tempConv = false
+	var crosshair = true
 	flag.IntVar(&deviceID, "d", 0, "Device ID")
 	flag.Parse()
 	webcam, err := gocv.OpenVideoCapture(deviceID)
@@ -36,64 +103,80 @@ func main() {
 		return
 	}
 	defer webcam.Close()
+	webcam.Set(gocv.VideoCaptureFPS, 25)
 	webcam.Set(gocv.VideoCaptureConvertRGB, 0) // do not convert format
 	window := gocv.NewWindow("Thermal")
 	defer window.Close()
-	img := gocv.NewMatWithSize(384, 256, gocv.MatTypeCV16UC2)
+	img := gocv.NewMatWithSize(384, 192, gocv.MatTypeCV16UC2)
 	defer img.Close()
 	window.ResizeWindow(256*scale, 192*scale)
 	fmt.Println(`keymap:
-	+ - | scale image
-	 c  | toggle temp conversion
-	 h  | toggle hud
+	z x | scale image - + 
+    b n | thermal area - +
+	 l  | toggle temp conversion
+	 c  | toggle crosshair
+	 h  | toggle high low Points
 	 m  | cycle through colormaps
-	 p  | save frame to file
+	 p  | save frame to PNG file
 	r t | record / stop
 	 q  | quit`)
 	for {
 		if ok := webcam.Read(&img); !ok {
-			fmt.Printf("Device closed: %v\n", deviceID)
-			return
+			fmt.Printf("Waiting for device: %v\n", deviceID)
+			time.Sleep(time.Millisecond * time.Duration(50))
+			continue
 		}
 		if img.Empty() {
 			continue
 		}
-		if img.Rows() != 384 || img.Cols() != 256 {
-			fmt.Println("Error: Image dimensions should be 384x256")
-			return
-		}
 		top := img.Region(image.Rect(0, 0, 256, 191))
+		thermalMat := img.Region(image.Rect(0, 192, 256, 384))
 		topBGR := gocv.NewMatWithSize(192, 256, gocv.MatTypeCV8UC3)
 		defer topBGR.Close()
 		gocv.CvtColor(top, &topBGR, gocv.ColorYUVToBGRYVYU)
 		defer top.Close()
-		gocv.ApplyColorMap(topBGR, &topBGR, currentColormap)
-		bottom := img.Region(image.Rect(0, 192, 256, 384))
-		defer bottom.Close()
-		// TODO : get vector and avg both channels
-		vec := bottom.GetShortAt(96, 128)
-		low := float64(vec)
-		avg := low
-		cTemp := (avg / 64) - 273.15
-		if tempConv {
-			tempLabel = "F"
-			vTemp = (cTemp * 9 / 5) + 32
-		} else {
-			tempLabel = "C"
-			vTemp = cTemp
-		}
+		gocv.ApplyColorMap(topBGR, &topBGR, gocv.ColormapTypes(userColorMaps[currentColorMap]))
 		gocv.Resize(topBGR, &topBGR, image.Point{X: 256 * scale, Y: 192 * scale}, 0, 0, gocv.InterpolationCubic)
-		gocv.Circle(&topBGR, image.Point{X: (256 / 2) * scale, Y: (192 / 2) * scale}, 1, color.RGBA{G: 255}, scale)
-		gocv.PutText(&topBGR, fmt.Sprintf("%.2f %v", vTemp, tempLabel), image.Point{X: (256 - 20) * scale, Y: (192 - 2) * scale}, gocv.FontHersheySimplex, 0.3, color.RGBA{R: 0, G: 0, B: 0, A: 0}, 2)
-		gocv.PutText(&topBGR, fmt.Sprintf("%.2f %v", vTemp, tempLabel), image.Point{X: (256 - 20) * scale, Y: (192 - 2) * scale}, gocv.FontHersheySimplex, 0.3, color.RGBA{R: 255, G: 255, B: 255, A: 0}, 1)
-		if hud {
-			gocv.PutText(&topBGR, fmt.Sprintf("%s", currentColormap), image.Point{X: 2, Y: 10}, gocv.FontHersheySimplex, 0.3, color.RGBA{R: 0, G: 0, B: 0, A: 0}, 2)
-			gocv.PutText(&topBGR, fmt.Sprintf("%s", currentColormap), image.Point{X: 2, Y: 10}, gocv.FontHersheySimplex, 0.3, color.RGBA{R: 255, G: 255, B: 255, A: 0}, 1)
+		if crosshair {
+			// draw crosshair
+			gocv.Line(&topBGR, image.Point{X: ((256 / 2) - crosshairSize) * scale, Y: (192 / 2) * scale}, image.Point{X: ((256 / 2) + crosshairSize) * scale, Y: (192 / 2) * scale}, crosshairColor, 1)
+			gocv.Line(&topBGR, image.Point{X: (256 / 2) * scale, Y: ((192 / 2) - crosshairSize) * scale}, image.Point{X: (256 / 2) * scale, Y: ((192 / 2) + crosshairSize) * scale}, crosshairColor, 1)
+			// get temp at center
+			centerTemp := getTempAt(128, 96, &thermalMat)
+			// show temp
+			gocv.PutText(&topBGR, centerTemp, image.Point{X: (256 * scale) - 45, Y: (192 * scale) - 2}, gocv.FontHersheySimplex, 0.3, elementColors["black"], 2)
+			gocv.PutText(&topBGR, centerTemp, image.Point{X: (256 * scale) - 45, Y: (192 * scale) - 2}, gocv.FontHersheySimplex, 0.3, elementColors["white"], 1)
+		}
+		if highLowToggle {
+			// get high low cords
+			lX, lY, hX, hY := getHighLow(&thermalMat)
+			// draw low temp dot
+			gocv.Circle(&topBGR, image.Point{X: lY * scale, Y: lX * scale}, 1, elementColors["blue"], 2)
+			// get low temp
+			lowestTemp := getTempAt(lY, lX, &thermalMat)
+			// show lowest temp text
+			gocv.PutText(&topBGR, lowestTemp, image.Point{X: (lY * scale) + 4, Y: (lX * scale) + 2}, gocv.FontHersheySimplex, 0.3, elementColors["black"], 2)
+			gocv.PutText(&topBGR, lowestTemp, image.Point{X: (lY * scale) + 4, Y: (lX * scale) + 2}, gocv.FontHersheySimplex, 0.3, elementColors["white"], 1)
+			// draw high dot
+			gocv.Circle(&topBGR, image.Point{X: hY * scale, Y: hX * scale}, 1, elementColors["red"], 2)
+			// get high temp
+			highestTemp := getTempAt(hY, hX, &thermalMat)
+			// show highest temp text
+			gocv.PutText(&topBGR, highestTemp, image.Point{X: (hY * scale) + 4, Y: (hX * scale) + 2}, gocv.FontHersheySimplex, 0.3, elementColors["black"], 2)
+			gocv.PutText(&topBGR, highestTemp, image.Point{X: (hY * scale) + 4, Y: (hX * scale) + 2}, gocv.FontHersheySimplex, 0.3, elementColors["white"], 1)
+		}
+		if info {
+			// display colormat text
+			gocv.PutText(&topBGR, fmt.Sprintf("%s", currentColormapLabel), image.Point{X: 2, Y: 10}, gocv.FontHersheySimplex, 0.3, elementColors["black"], 2)
+			gocv.PutText(&topBGR, fmt.Sprintf("%s", currentColormapLabel), image.Point{X: 2, Y: 10}, gocv.FontHersheySimplex, 0.3, elementColors["white"], 1)
+			// draw thermal search area rect
+			gocv.Rectangle(&topBGR, image.Rect(thermalPadding*scale, thermalPadding*scale, (256-thermalPadding)*scale, (192-thermalPadding)*scale), elementColors["red"], 1)
 		}
 		if recording {
 			elapsed := time.Since(recTime)
 			formattedElapsed := fmt.Sprintf("%02d:%02d:%02d", int(elapsed.Hours()), int(elapsed.Minutes())%60, int(elapsed.Seconds())%60)
-			gocv.PutText(&topBGR, fmt.Sprintf("REC:%v", formattedElapsed), image.Point{X: (256 * scale) - 70, Y: 10}, gocv.FontHersheySimplex, 0.3, color.RGBA{R: 255, G: 255, B: 255, A: 0}, 1)
+			gocv.PutText(&topBGR, fmt.Sprintf("REC:%v", formattedElapsed), image.Point{X: (256 * scale) - 70, Y: 10}, gocv.FontHersheySimplex, 0.3, elementColors["black"], 2)
+			gocv.PutText(&topBGR, fmt.Sprintf("REC:%v", formattedElapsed), image.Point{X: (256 * scale) - 70, Y: 10}, gocv.FontHersheySimplex, 0.3, elementColors["white"], 1)
 			if err := videoWriter.Write(topBGR); err != nil {
 				log.Fatalf("Error writing image data: %v", err)
 				return
@@ -103,27 +186,23 @@ func main() {
 		ww := window.WaitKey(1) // ascii keycode // https://www.ascii-code.com/
 		if ww > -1 {
 			switch ww {
-			case 113: // ASCII code 113 = q
+			case 113: // q
 				if err := window.Close(); err != nil {
 					log.Fatalf("Error closing window: %v", err)
 				}
 				os.Exit(0)
 			case 109: // m
-				ccm++
-				if ccm == len(colormaps) {
-					ccm = 0
+				currentColorMap++
+				if currentColorMap == len(userColorMaps) {
+					currentColorMap = 0
 				}
-				currentColormap = colormaps[ccm]
+				currentColormapLabel = colormaps[userColorMaps[currentColorMap]]
 			case 104: // h
-				if hud {
-					hud = false
-				} else {
-					hud = true
-				}
-			case 61: // = (+)
+				highLowToggle = !highLowToggle
+			case 120: // x
 				scale++
 				window.ResizeWindow(256*scale, 192*scale)
-			case 45: // -
+			case 122: // z
 				if scale > 1 {
 					scale--
 					window.ResizeWindow(256*scale, 192*scale)
@@ -148,11 +227,19 @@ func main() {
 						fmt.Printf("Error closing video writer: %v\n", err)
 					}
 				}
+			case 108: // l
+				tempConv = !tempConv
 			case 99: // c
-				if tempConv {
-					tempConv = false
-				} else {
-					tempConv = true
+				crosshair = !crosshair
+			case 105: // i
+				info = !info
+			case 98: // b
+				if thermalPadding < 80 {
+					thermalPadding++
+				}
+			case 110: // n
+				if thermalPadding > 2 {
+					thermalPadding--
 				}
 			default:
 				fmt.Printf("Invalid key: %v\n", ww)
