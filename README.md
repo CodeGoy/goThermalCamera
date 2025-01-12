@@ -35,4 +35,3 @@ keymap:
 ## bugs
 
 * The inital windows does not want to resize down only up, closing the window fixes it, allowing for normal resizing 
-* random seg faults, lol
