@@ -34,4 +34,4 @@ keymap:
 
 ## bugs
 
-* randomly seg faults on start up, LOL
+* The inital windows does not want to resize down only up, closing the window fixes it, allowing for normal resizing 

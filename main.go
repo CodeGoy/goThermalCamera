@@ -126,7 +126,7 @@ func main() {
 			time.Sleep(time.Millisecond * time.Duration(50))
 			continue
 		}
-		if img.Empty() {
+		if img.Empty() || img.Rows() != 384 && img.Cols() != 256 {
 			continue
 		}
 		top := img.Region(image.Rect(0, 0, 256, 192))
