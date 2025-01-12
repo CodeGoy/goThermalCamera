@@ -76,14 +76,15 @@ func getHighLow(mat *gocv.Mat) (lX, lY, hX, hY int) {
 }
 
 func getTempAt(x, y int, mat *gocv.Mat) string {
+	// fmt.Printf("rows: %d cols: %d type: %s channels: %d\n", mat.Rows(), mat.Cols(), mat.Type(), mat.Channels())
 	vecShort0 := mat.GetShortAt3(y, x, 0)
 	vecShort1 := mat.GetShortAt3(y, x, 1)
 	cTemp := (((float64(vecShort0) + float64(vecShort1)) / 2) / 64) - 273.15
 	if tempConv {
-		return fmt.Sprintf("%.2f %s", (cTemp*9/5)+32, " F")
+		return fmt.Sprintf("%.2f %s", (cTemp*9/5)+32, "F")
 
 	}
-	return fmt.Sprintf("%.2f %s", cTemp, " C")
+	return fmt.Sprintf("%.2f %s", cTemp, "C")
 
 }
 
@@ -122,19 +123,18 @@ func main() {
 	 q  | quit`)
 	for {
 		if ok := webcam.Read(&img); !ok {
-			fmt.Printf("Waiting for device: %v\n", deviceID)
-			time.Sleep(time.Millisecond * time.Duration(50))
 			continue
 		}
 		if img.Empty() || img.Rows() != 384 && img.Cols() != 256 {
 			continue
 		}
 		top := img.Region(image.Rect(0, 0, 256, 192))
+		defer top.Close()
 		thermalMat := img.Region(image.Rect(0, 192, 256, 384))
+		defer thermalMat.Close()
 		topBGR := gocv.NewMat()
 		defer topBGR.Close()
 		gocv.CvtColor(top, &topBGR, gocv.ColorYUVToBGRYVYU)
-		defer top.Close()
 		gocv.ApplyColorMap(topBGR, &topBGR, gocv.ColormapTypes(userColorMaps[currentColorMap]))
 		gocv.Resize(topBGR, &topBGR, image.Point{X: 256 * scale, Y: 192 * scale}, 0, 0, gocv.InterpolationCubic)
 		window.ResizeWindow(256*scale, 192*scale)
@@ -152,6 +152,7 @@ func main() {
 			// get high low cords
 			lX, lY, hX, hY := getHighLow(&thermalMat)
 			// draw low temp dot
+			gocv.Circle(&topBGR, image.Point{X: lY * scale, Y: lX * scale}, 2, elementColors["white"], 2)
 			gocv.Circle(&topBGR, image.Point{X: lY * scale, Y: lX * scale}, 1, elementColors["blue"], 2)
 			// get low temp
 			lowestTemp := getTempAt(lY, lX, &thermalMat)
@@ -159,6 +160,7 @@ func main() {
 			gocv.PutText(&topBGR, lowestTemp, image.Point{X: (lY * scale) + 4, Y: (lX * scale) + 2}, gocv.FontHersheySimplex, 0.3, elementColors["black"], 2)
 			gocv.PutText(&topBGR, lowestTemp, image.Point{X: (lY * scale) + 4, Y: (lX * scale) + 2}, gocv.FontHersheySimplex, 0.3, elementColors["white"], 1)
 			// draw high dot
+			gocv.Circle(&topBGR, image.Point{X: hY * scale, Y: hX * scale}, 2, elementColors["white"], 2)
 			gocv.Circle(&topBGR, image.Point{X: hY * scale, Y: hX * scale}, 1, elementColors["red"], 2)
 			// get high temp
 			highestTemp := getTempAt(hY, hX, &thermalMat)
