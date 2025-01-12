@@ -20,9 +20,9 @@ var (
 		"black": {0, 0, 0, 255},
 		"white": {255, 255, 255, 255},
 	}
-	colormaps     = map[int]string{0: "AUTUMN", 1: "BONE", 2: "JET", 3: "WINTER", 4: "RAINBOW", 5: "OCEAN", 6: "SUMMER", 7: "SPRING", 8: "COOL", 9: "HSV", 10: "PINK", 11: "HOT", 12: "PARULA", 13: "MAGMA", 14: "INFERNO", 15: "PLASMA", 16: "VIRIDIS", 17: "CIVIDIS", 18: "TWILIGHT", 19: "TWILIGHT_SHIFTED", 20: "TURBO", 21: "DEEPGREEN"}
-	userColorMaps = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21} // customize colormaps here
-	//userColorMaps        = []int{1, 20, 21, 19, 17} // my colormaps
+	colormaps = map[int]string{0: "AUTUMN", 1: "BONE", 2: "JET", 3: "WINTER", 4: "RAINBOW", 5: "OCEAN", 6: "SUMMER", 7: "SPRING", 8: "COOL", 9: "HSV", 10: "PINK", 11: "HOT", 12: "PARULA", 13: "MAGMA", 14: "INFERNO", 15: "PLASMA", 16: "VIRIDIS", 17: "CIVIDIS", 18: "TWILIGHT", 19: "TWILIGHT_SHIFTED", 20: "TURBO", 21: "DEEPGREEN"}
+	//userColorMaps = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21} // customize colormaps here
+	userColorMaps = []int{1, 20, 21, 19, 17} // my colormaps
 )
 
 type Thermal struct {
@@ -36,7 +36,6 @@ type Thermal struct {
 	videoWriter    *gocv.VideoWriter
 	recTime        time.Time
 	recording      bool
-	opts           Opts
 }
 
 type Opts struct {
@@ -45,7 +44,8 @@ type Opts struct {
 	info                 bool
 	crosshair            bool
 	crosshairSize        int
-	crosshairColor       color.RGBA
+	colorKeys            []string
+	currentElementColor  string
 	currentColorMap      int
 	currentColormapLabel string
 }
@@ -114,8 +114,8 @@ func (t *Thermal) start(o *Opts) {
 		window.ResizeWindow(t.width*t.scale, t.height*t.scale)
 		if o.crosshair {
 			// draw crosshair
-			gocv.Line(&topBGR, image.Point{X: ((t.width / 2) - o.crosshairSize) * t.scale, Y: (t.height / 2) * t.scale}, image.Point{X: ((t.width / 2) + o.crosshairSize) * t.scale, Y: (t.height / 2) * t.scale}, o.crosshairColor, 1)
-			gocv.Line(&topBGR, image.Point{X: (t.width / 2) * t.scale, Y: ((t.height / 2) - o.crosshairSize) * t.scale}, image.Point{X: (t.width / 2) * t.scale, Y: ((t.height / 2) + o.crosshairSize) * t.scale}, o.crosshairColor, 1)
+			gocv.Line(&topBGR, image.Point{X: ((t.width / 2) - o.crosshairSize) * t.scale, Y: (t.height / 2) * t.scale}, image.Point{X: ((t.width / 2) + o.crosshairSize) * t.scale, Y: (t.height / 2) * t.scale}, elementColors[o.currentElementColor], 1)
+			gocv.Line(&topBGR, image.Point{X: (t.width / 2) * t.scale, Y: ((t.height / 2) - o.crosshairSize) * t.scale}, image.Point{X: (t.width / 2) * t.scale, Y: ((t.height / 2) + o.crosshairSize) * t.scale}, elementColors[o.currentElementColor], 1)
 			// get temp at center
 			centerTemp := t.getTempAt(t.width/2, t.height/2, o.tempConv)
 			// show temp
@@ -207,6 +207,18 @@ func (t *Thermal) start(o *Opts) {
 				o.tempConv = !o.tempConv
 			case 99: // c
 				o.crosshair = !o.crosshair
+			case 118: // v
+				for i, key := range o.colorKeys {
+					if key == o.currentElementColor {
+						fmt.Println(i, key)
+						if i+1 < len(o.colorKeys) {
+							o.currentElementColor = o.colorKeys[i+1]
+						} else {
+							o.currentElementColor = o.colorKeys[0]
+						}
+						break
+					}
+				}
 			case 105: // i
 				o.info = !o.info
 			case 98: // b
@@ -230,20 +242,23 @@ func main() {
 	b n | thermal area - +
 	 l  | toggle temp conversion
 	 c  | toggle crosshair
+	 v  | cycle element colors
 	 h  | toggle high low Points
 	 m  | cycle through colormaps
 	 p  | save frame to PNG file
 	r t | record / stop
 	 q  | quit`)
 	o := &Opts{
-		crosshair:            false,
+		crosshair:            true,
 		crosshairSize:        10,
-		crosshairColor:       elementColors["red"],
-		currentColorMap:      0,
+		currentElementColor:  "red",
 		currentColormapLabel: colormaps[userColorMaps[0]],
-		highLowToggle:        false,
-		info:                 false,
-		tempConv:             false,
+		highLowToggle:        true,
+		info:                 true,
+		tempConv:             true,
+	}
+	for k := range elementColors {
+		o.colorKeys = append(o.colorKeys, k)
 	}
 	t := &Thermal{
 		height:         192,
@@ -253,7 +268,7 @@ func main() {
 		thermalMat:     gocv.Mat{},
 		videoWriter:    &gocv.VideoWriter{},
 		recording:      false,
-		thermalPadding: 10,
+		thermalPadding: 20,
 	}
 	flag.IntVar(&t.device, "d", 0, "Device ID")
 	flag.Parse()
