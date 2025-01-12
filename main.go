@@ -21,30 +21,31 @@ var (
 		"white": {255, 255, 255, 255},
 	}
 	colormaps = map[int]string{
-		0:  "AUTUMN",           // X
-		1:  "BONE",             // v-
-		2:  "JET",              // v-
-		3:  "WINTER",           // x
-		4:  "RAINBOW",          // x
-		5:  "OCEAN",            // v-
-		6:  "SUMMER",           // x
-		7:  "SPRING",           // x
-		8:  "COOL",             // x
-		9:  "HSV",              // x
-		10: "PINK",             // v-
-		11: "HOT",              // v-
-		12: "PARULA",           // x
-		13: "MAGMA",            // v-
-		14: "INFERNO",          // v-
-		15: "PLASMA",           // x
-		16: "VIRIDIS",          // v-
-		17: "CIVIDIS",          // v-
-		18: "TWILIGHT",         // x
-		19: "TWILIGHT_SHIFTED", // v-
-		20: "TURBO",            // v-
-		21: "DEEPGREEN",        // v-
+		0:  "AUTUMN",
+		1:  "BONE",
+		2:  "JET",
+		3:  "WINTER",
+		4:  "RAINBOW",
+		5:  "OCEAN",
+		6:  "SUMMER",
+		7:  "SPRING",
+		8:  "COOL",
+		9:  "HSV",
+		10: "PINK",
+		11: "HOT",
+		12: "PARULA",
+		13: "MAGMA",
+		14: "INFERNO",
+		15: "PLASMA",
+		16: "VIRIDIS",
+		17: "CIVIDIS",
+		18: "TWILIGHT",
+		19: "TWILIGHT_SHIFTED",
+		20: "TURBO",
+		21: "DEEPGREEN",
 	}
-	userColorMaps        = []int{1, 21, 5, 11, 10, 2, 13, 16, 17, 19, 20}
+	userColorMaps = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21} // customize colormaps here
+	//userColorMaps        = []int{1, 20, 21, 19, 17} // my colormaps
 	currentColorMap      = 0
 	currentColormapLabel = colormaps[userColorMaps[currentColorMap]]
 	recTime              time.Time
@@ -79,13 +80,12 @@ func getTempAt(x, y int, mat *gocv.Mat) string {
 	// fmt.Printf("rows: %d cols: %d type: %s channels: %d\n", mat.Rows(), mat.Cols(), mat.Type(), mat.Channels())
 	vecShort0 := mat.GetShortAt3(y, x, 0)
 	vecShort1 := mat.GetShortAt3(y, x, 1)
-	cTemp := (((float64(vecShort0) + float64(vecShort1)) / 2) / 64) - 273.15
+	shortAvg := (vecShort0 + vecShort1) / 2
+	cTemp := (float64(shortAvg) / 64) - 273.15
 	if tempConv {
 		return fmt.Sprintf("%.2f %s", (cTemp*9/5)+32, "F")
-
 	}
 	return fmt.Sprintf("%.2f %s", cTemp, "C")
-
 }
 
 func main() {
@@ -185,7 +185,7 @@ func main() {
 			}
 		}
 		window.IMShow(topBGR)
-		ww := window.WaitKey(1) // ascii keycode // https://www.ascii-code.com/
+		ww := window.WaitKey(2) // ascii keycode // https://www.ascii-code.com/
 		if ww > -1 {
 			switch ww {
 			case 113: // q
