@@ -22,9 +22,10 @@ var (
 	}
 	fonts     = []gocv.HersheyFont{gocv.FontHersheySimplex, gocv.FontHersheyPlain, gocv.FontHersheyDuplex, gocv.FontHersheyComplex, gocv.FontHersheyTriplex, gocv.FontHersheyComplexSmall, gocv.FontHersheyScriptSimplex, gocv.FontHersheyScriptComplex, gocv.FontItalic}
 	colormaps = map[int]string{0: "AUTUMN", 1: "BONE", 2: "JET", 3: "WINTER", 4: "RAINBOW", 5: "OCEAN", 6: "SUMMER", 7: "SPRING", 8: "COOL", 9: "HSV", 10: "PINK", 11: "HOT", 12: "PARULA", 13: "MAGMA", 14: "INFERNO", 15: "PLASMA", 16: "VIRIDIS", 17: "CIVIDIS", 18: "TWILIGHT", 19: "TWILIGHT_SHIFTED", 20: "TURBO", 21: "DEEPGREEN"}
-	//userColorMaps = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21} // customize colormaps here
-	userColorMaps = []int{1, 20, 21, 19, 17} // my colormaps
+	userColorMaps = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21} // customize colormaps here
+	//userColorMaps = []int{1, 20, 21, 19, 17} // my colormaps
 	fontShadow    = 3
+	testAvgTemp   bool
 )
 
 type Thermal struct {
@@ -79,7 +80,8 @@ func (t *Thermal) getHighLow(o *Opts) (lX, lY, hX, hY int) {
 // getAvgTempAt : causes seg fault, LOL
 func (t *Thermal) getAvgTempAt(x, y int, conv bool) string {
 	// avg of both channel gives the correct temp
-	// but causes random seg faults and instant seg fault when reading temp and starting video recording
+	// but causes random seg faults when reading temp
+	// and instant seg fault when reading temp and video recording starts, fun!!!
 	st0 := t.thermalMat.GetShortAt3(y, x, 0) // causes seg fault
 	st1 := t.thermalMat.GetShortAt3(y, x, 1) // causes seg fault
 	stAvg := (float64(st0) + float64(st1)) / 2
@@ -117,11 +119,14 @@ func (t *Thermal) start(o *Opts) {
 		if ok := webcam.Read(&img); !ok {
 			continue
 		}
-		if img.Empty() || img.Rows() != t.height*2 && img.Cols() != t.width {
+		if img.Empty() {
 			continue
 		}
-		top := img.Region(image.Rect(0, 0, t.width, t.height))
-		t.thermalMat = img.Region(image.Rect(0, t.height, t.width, t.height*2))
+		// fmt.Printf("frame width: %d, height: %d\n", img.Cols(), img.Rows())
+		rImg := img.Reshape(2, 384)
+		defer rImg.Close()
+		top := rImg.Region(image.Rect(0, 0, t.width, t.height))
+		t.thermalMat = rImg.Region(image.Rect(0, t.height, t.width, t.height*2))
 		defer t.thermalMat.Close()
 		topBGR := gocv.NewMat()
 		defer topBGR.Close()
@@ -132,13 +137,19 @@ func (t *Thermal) start(o *Opts) {
 		window.ResizeWindow(t.width*o.scale, t.height*o.scale)
 		if o.crosshair {
 			// draw crosshair
+			// H
 			gocv.Line(&topBGR, image.Point{X: ((t.width / 2) - o.crosshairSize) * o.scale, Y: (t.height / 2) * o.scale}, image.Point{X: ((t.width / 2) + o.crosshairSize) * o.scale, Y: (t.height / 2) * o.scale}, elementColors["black"], 2)
 			gocv.Line(&topBGR, image.Point{X: ((t.width / 2) - o.crosshairSize) * o.scale, Y: (t.height / 2) * o.scale}, image.Point{X: ((t.width / 2) + o.crosshairSize) * o.scale, Y: (t.height / 2) * o.scale}, elementColors[o.currentElementColor], 1)
-
+			// V
 			gocv.Line(&topBGR, image.Point{X: (t.width / 2) * o.scale, Y: ((t.height / 2) - o.crosshairSize) * o.scale}, image.Point{X: (t.width / 2) * o.scale, Y: ((t.height / 2) + o.crosshairSize) * o.scale}, elementColors["black"], 2)
 			gocv.Line(&topBGR, image.Point{X: (t.width / 2) * o.scale, Y: ((t.height / 2) - o.crosshairSize) * o.scale}, image.Point{X: (t.width / 2) * o.scale, Y: ((t.height / 2) + o.crosshairSize) * o.scale}, elementColors[o.currentElementColor], 1)
 			// get temp at center
-			centerTemp := t.getTempAt(t.width/2, t.height/2, o.tempConv)
+			var centerTemp string
+			if testAvgTemp {
+				centerTemp = t.getAvgTempAt(t.width/2, t.height/2, o.tempConv)
+			} else {
+				centerTemp = t.getTempAt(t.width/2, t.height/2, o.tempConv)
+			}
 			// show temp
 			gocv.PutText(&topBGR, centerTemp, image.Point{X: 2, Y: (t.height * o.scale) - 2}, o.font, o.fontScale, elementColors["black"], fontShadow)
 			gocv.PutText(&topBGR, centerTemp, image.Point{X: 2, Y: (t.height * o.scale) - 2}, o.font, o.fontScale, elementColors[o.currentElementColor], 1)
@@ -150,7 +161,12 @@ func (t *Thermal) start(o *Opts) {
 			gocv.Circle(&topBGR, image.Point{X: lY * o.scale, Y: lX * o.scale}, 2, elementColors["white"], 2)
 			gocv.Circle(&topBGR, image.Point{X: lY * o.scale, Y: lX * o.scale}, 1, elementColors["blue"], 2)
 			// get low temp
-			lowestTemp := t.getTempAt(lY, lX, o.tempConv)
+			var lowestTemp string
+			if testAvgTemp {
+				lowestTemp = t.getAvgTempAt(lY, lX, o.tempConv)
+			} else {
+				lowestTemp = t.getTempAt(lY, lX, o.tempConv)
+			}
 			// show lowest temp text
 			gocv.PutText(&topBGR, lowestTemp, image.Point{X: (lY * o.scale) + 4, Y: (lX * o.scale) + 2}, o.font, o.fontScale, elementColors["black"], fontShadow)
 			gocv.PutText(&topBGR, lowestTemp, image.Point{X: (lY * o.scale) + 4, Y: (lX * o.scale) + 2}, o.font, o.fontScale, elementColors[o.currentElementColor], 1)
@@ -158,7 +174,12 @@ func (t *Thermal) start(o *Opts) {
 			gocv.Circle(&topBGR, image.Point{X: hY * o.scale, Y: hX * o.scale}, 2, elementColors["white"], 2)
 			gocv.Circle(&topBGR, image.Point{X: hY * o.scale, Y: hX * o.scale}, 1, elementColors["red"], 2)
 			// get high temp
-			highestTemp := t.getTempAt(hY, hX, o.tempConv)
+			var highestTemp string
+			if testAvgTemp {
+				highestTemp = t.getAvgTempAt(hY, hX, o.tempConv)
+			} else {
+				highestTemp = t.getTempAt(hY, hX, o.tempConv)
+			}
 			// show highest temp text
 			gocv.PutText(&topBGR, highestTemp, image.Point{X: (hY * o.scale) + 4, Y: (hX * o.scale) + 2}, o.font, o.fontScale, elementColors["black"], fontShadow)
 			gocv.PutText(&topBGR, highestTemp, image.Point{X: (hY * o.scale) + 4, Y: (hX * o.scale) + 2}, o.font, o.fontScale, elementColors[o.currentElementColor], 1)
@@ -316,6 +337,7 @@ func main() {
 		o.colorKeys = append(o.colorKeys, k)
 	}
 	flag.IntVar(&t.device, "d", 0, "Device ID")
+	flag.BoolVar(&testAvgTemp, "a", false, "Test avg temperature(will cause segfaults, lol)")
 	flag.Parse()
 	t.start(o)
 }
