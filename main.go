@@ -20,12 +20,12 @@ var (
 		"blue":  {0, 0, 255, 255},
 		"black": {0, 0, 0, 255},
 	}
-	fonts     = []gocv.HersheyFont{gocv.FontHersheySimplex, gocv.FontHersheyPlain, gocv.FontHersheyDuplex, gocv.FontHersheyComplex, gocv.FontHersheyTriplex, gocv.FontHersheyComplexSmall, gocv.FontHersheyScriptSimplex, gocv.FontHersheyScriptComplex, gocv.FontItalic}
-	colormaps = map[int]string{0: "AUTUMN", 1: "BONE", 2: "JET", 3: "WINTER", 4: "RAINBOW", 5: "OCEAN", 6: "SUMMER", 7: "SPRING", 8: "COOL", 9: "HSV", 10: "PINK", 11: "HOT", 12: "PARULA", 13: "MAGMA", 14: "INFERNO", 15: "PLASMA", 16: "VIRIDIS", 17: "CIVIDIS", 18: "TWILIGHT", 19: "TWILIGHT_SHIFTED", 20: "TURBO", 21: "DEEPGREEN"}
+	fonts         = []gocv.HersheyFont{gocv.FontHersheySimplex, gocv.FontHersheyPlain, gocv.FontHersheyDuplex, gocv.FontHersheyComplex, gocv.FontHersheyTriplex, gocv.FontHersheyComplexSmall, gocv.FontHersheyScriptSimplex, gocv.FontHersheyScriptComplex, gocv.FontItalic}
+	colormaps     = map[int]string{0: "AUTUMN", 1: "BONE", 2: "JET", 3: "WINTER", 4: "RAINBOW", 5: "OCEAN", 6: "SUMMER", 7: "SPRING", 8: "COOL", 9: "HSV", 10: "PINK", 11: "HOT", 12: "PARULA", 13: "MAGMA", 14: "INFERNO", 15: "PLASMA", 16: "VIRIDIS", 17: "CIVIDIS", 18: "TWILIGHT", 19: "TWILIGHT_SHIFTED", 20: "TURBO", 21: "DEEPGREEN"}
 	userColorMaps = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21} // customize colormaps here
 	//userColorMaps = []int{1, 20, 21, 19, 17} // my colormaps
-	fontShadow    = 3
-	testAvgTemp   bool
+	fontShadow  = 3
+	testAvgTemp bool
 )
 
 type Thermal struct {
@@ -82,7 +82,7 @@ func (t *Thermal) getAvgTempAt(x, y int, conv bool) string {
 	// avg of both channel gives the correct temp
 	// but causes random seg faults when reading temp
 	// and instant seg fault when reading temp and video recording starts, fun!!!
-	st0 := t.thermalMat.GetShortAt3(y, x, 0) // causes seg fault
+	st0 := t.thermalMat.GetShortAt(y, x) // causes seg fault
 	st1 := t.thermalMat.GetShortAt3(y, x, 1) // causes seg fault
 	stAvg := (float64(st0) + float64(st1)) / 2
 	cTemp := (stAvg / 64) - 273.15
@@ -123,18 +123,31 @@ func (t *Thermal) start(o *Opts) {
 			continue
 		}
 		// fmt.Printf("frame width: %d, height: %d\n", img.Cols(), img.Rows())
+		// reshape mat into 384x256 2 channels from a 1x196608 1 channel mat;
 		rImg := img.Reshape(2, 384)
-		defer rImg.Close()
+		// get top visible mat
 		top := rImg.Region(image.Rect(0, 0, t.width, t.height))
+		// get bottom thermal mat
 		t.thermalMat = rImg.Region(image.Rect(0, t.height, t.width, t.height*2))
-		defer t.thermalMat.Close()
+		// close reshaped mat
+		if rImg.Close() != nil {
+			fmt.Printf("Error closing image: %v\n", rImg.Close())
+		}
+		// top BGR visible mat
 		topBGR := gocv.NewMat()
-		defer topBGR.Close()
+		// convert 2 channel grayscale mat to 3 channel BGR mat,applying a colormap requires 1 or 3 channel mat
 		gocv.CvtColor(top, &topBGR, gocv.ColorYUVToBGRYVYU)
-		defer top.Close()
+		// close top mat
+		if top.Close() != nil {
+			fmt.Printf("Error closing image: %v\n", top.Close())
+		}
+		// apply colormap to visible mat
 		gocv.ApplyColorMap(topBGR, &topBGR, gocv.ColormapTypes(userColorMaps[o.currentColorMap]))
+		// resize mat to o.scale
 		gocv.Resize(topBGR, &topBGR, image.Point{X: t.width * o.scale, Y: t.height * o.scale}, 0, 0, gocv.InterpolationCubic)
+		// resize window to mat size
 		window.ResizeWindow(t.width*o.scale, t.height*o.scale)
+		// draw crosshair and temp
 		if o.crosshair {
 			// draw crosshair
 			// H
@@ -154,6 +167,7 @@ func (t *Thermal) start(o *Opts) {
 			gocv.PutText(&topBGR, centerTemp, image.Point{X: 2, Y: (t.height * o.scale) - 2}, o.font, o.fontScale, elementColors["black"], fontShadow)
 			gocv.PutText(&topBGR, centerTemp, image.Point{X: 2, Y: (t.height * o.scale) - 2}, o.font, o.fontScale, elementColors[o.currentElementColor], 1)
 		}
+		// draw high low points within padded zone
 		if o.highLowToggle {
 			// get high low cords
 			lX, lY, hX, hY := t.getHighLow(o)
@@ -184,6 +198,11 @@ func (t *Thermal) start(o *Opts) {
 			gocv.PutText(&topBGR, highestTemp, image.Point{X: (hY * o.scale) + 4, Y: (hX * o.scale) + 2}, o.font, o.fontScale, elementColors["black"], fontShadow)
 			gocv.PutText(&topBGR, highestTemp, image.Point{X: (hY * o.scale) + 4, Y: (hX * o.scale) + 2}, o.font, o.fontScale, elementColors[o.currentElementColor], 1)
 		}
+		// close thermal mat
+		if err := t.thermalMat.Close(); err != nil {
+			log.Printf("error closing thermal mat: %v", err)
+		}
+		// show program info
 		if o.info {
 			// draw thermal search area rect
 			gocv.Rectangle(&topBGR, image.Rect(o.thermalPadding*o.scale, o.thermalPadding*o.scale, (t.width-o.thermalPadding)*o.scale, (t.height-o.thermalPadding)*o.scale), elementColors[o.currentElementColor], 1)
@@ -197,16 +216,26 @@ func (t *Thermal) start(o *Opts) {
 			gocv.PutText(&topBGR, fontScaleText, image.Point{X: 2, Y: 30}, o.font, o.fontScale, elementColors[o.currentElementColor], 1)
 
 		}
+		// if recording draw elapsed time and write topBGR mat to t.videoWriter
 		if t.recording {
+			// get time elapsed since recording started
 			elapsed := time.Since(t.recTime)
+			// draw elapsed text
 			elapsedText := fmt.Sprintf("REC:%02d:%02d:%02d", int(elapsed.Hours()), int(elapsed.Minutes())%60, int(elapsed.Seconds())%60)
 			gocv.PutText(&topBGR, elapsedText, image.Point{X: (t.width * o.scale) / 2, Y: 10}, o.font, o.fontScale, elementColors["black"], fontShadow)
 			gocv.PutText(&topBGR, elapsedText, image.Point{X: (t.width * o.scale) / 2, Y: 10}, o.font, o.fontScale, elementColors[o.currentElementColor], 1)
+			// write topBGR to t.videoWriter
 			if err := t.videoWriter.Write(topBGR); err != nil {
 				log.Printf("Error writing image data: %v", err)
 			}
 		}
+		// display topBRG mat
 		window.IMShow(topBGR)
+		// close topBGR mat
+		if topBGR.Close() != nil {
+			log.Printf("Error closing window: %v", topBGR.Close())
+		}
+		// process key presses
 		ww := window.WaitKey(1) // ascii keycode // https://www.ascii-code.com/
 		if ww > -1 {
 			switch ww {
@@ -222,12 +251,15 @@ func (t *Thermal) start(o *Opts) {
 				}
 				o.currentColormapLabel = colormaps[userColorMaps[o.currentColorMap]]
 			case 104: // h
+				// flip o.highLowToggle
 				o.highLowToggle = !o.highLowToggle
 			case 120: // x
+				// changing scale during recording crashes program
 				if !t.recording {
 					o.scale++
 				}
 			case 122: // z
+				// changing scale during recording crashes program
 				if o.scale > 1 && !t.recording {
 					o.scale--
 				}
