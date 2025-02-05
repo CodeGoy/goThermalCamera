@@ -20,11 +20,12 @@ var (
 		"blue":  {0, 0, 255, 255},
 		"black": {0, 0, 0, 255},
 	}
-	fonts     = []gocv.HersheyFont{gocv.FontHersheySimplex, gocv.FontHersheyPlain, gocv.FontHersheyDuplex, gocv.FontHersheyComplex, gocv.FontHersheyTriplex, gocv.FontHersheyComplexSmall, gocv.FontHersheyScriptSimplex, gocv.FontHersheyScriptComplex, gocv.FontItalic}
-	colormaps = map[int]string{0: "AUTUMN", 1: "BONE", 2: "JET", 3: "WINTER", 4: "RAINBOW", 5: "OCEAN", 6: "SUMMER", 7: "SPRING", 8: "COOL", 9: "HSV", 10: "PINK", 11: "HOT", 12: "PARULA", 13: "MAGMA", 14: "INFERNO", 15: "PLASMA", 16: "VIRIDIS", 17: "CIVIDIS", 18: "TWILIGHT", 19: "TWILIGHT_SHIFTED", 20: "TURBO", 21: "DEEPGREEN"}
-	//userColorMaps = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21} // customize colormaps here
-	userColorMaps = []int{1, 20, 21, 19, 17} // my colormaps
-	fontShadow    = 3
+	fonts         = []gocv.HersheyFont{gocv.FontHersheySimplex, gocv.FontHersheyPlain, gocv.FontHersheyDuplex, gocv.FontHersheyComplex, gocv.FontHersheyTriplex, gocv.FontHersheyComplexSmall, gocv.FontHersheyScriptSimplex, gocv.FontHersheyScriptComplex, gocv.FontItalic}
+	colormaps     = map[int]string{0: "AUTUMN", 1: "BONE", 2: "JET", 3: "WINTER", 4: "RAINBOW", 5: "OCEAN", 6: "SUMMER", 7: "SPRING", 8: "COOL", 9: "HSV", 10: "PINK", 11: "HOT", 12: "PARULA", 13: "MAGMA", 14: "INFERNO", 15: "PLASMA", 16: "VIRIDIS", 17: "CIVIDIS", 18: "TWILIGHT", 19: "TWILIGHT_SHIFTED", 20: "TURBO", 21: "DEEPGREEN"}
+	userColorMaps = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21} // customize colormaps here
+	//userColorMaps = []int{1, 20, 21, 19, 17} // my colormaps
+	fontShadow  = 3
+	testAvgTemp bool
 )
 
 type Thermal struct {
@@ -79,8 +80,9 @@ func (t *Thermal) getHighLow(o *Opts) (lX, lY, hX, hY int) {
 // getAvgTempAt : causes seg fault, LOL
 func (t *Thermal) getAvgTempAt(x, y int, conv bool) string {
 	// avg of both channel gives the correct temp
-	// but causes random seg faults and instant seg fault when reading temp and starting video recording
-	st0 := t.thermalMat.GetShortAt3(y, x, 0) // causes seg fault
+	// but causes random seg faults when reading temp
+	// and instant seg fault when reading temp and video recording starts, fun!!!
+	st0 := t.thermalMat.GetShortAt(y, x) // causes seg fault
 	st1 := t.thermalMat.GetShortAt3(y, x, 1) // causes seg fault
 	stAvg := (float64(st0) + float64(st1)) / 2
 	cTemp := (stAvg / 64) - 273.15
@@ -117,32 +119,55 @@ func (t *Thermal) start(o *Opts) {
 		if ok := webcam.Read(&img); !ok {
 			continue
 		}
-		if img.Empty() || img.Rows() != t.height*2 && img.Cols() != t.width {
+		if img.Empty() {
 			continue
 		}
-		top := img.Region(image.Rect(0, 0, t.width, t.height))
-		t.thermalMat = img.Region(image.Rect(0, t.height, t.width, t.height*2))
-		defer t.thermalMat.Close()
+		// fmt.Printf("frame width: %d, height: %d\n", img.Cols(), img.Rows())
+		// reshape mat into 384x256 2 channels from a 1x196608 1 channel mat;
+		rImg := img.Reshape(2, 384)
+		// get top visible mat
+		top := rImg.Region(image.Rect(0, 0, t.width, t.height))
+		// get bottom thermal mat
+		t.thermalMat = rImg.Region(image.Rect(0, t.height, t.width, t.height*2))
+		// close reshaped mat
+		if rImg.Close() != nil {
+			fmt.Printf("Error closing image: %v\n", rImg.Close())
+		}
+		// top BGR visible mat
 		topBGR := gocv.NewMat()
-		defer topBGR.Close()
+		// convert 2 channel grayscale mat to 3 channel BGR mat,applying a colormap requires 1 or 3 channel mat
 		gocv.CvtColor(top, &topBGR, gocv.ColorYUVToBGRYVYU)
-		defer top.Close()
+		// close top mat
+		if top.Close() != nil {
+			fmt.Printf("Error closing image: %v\n", top.Close())
+		}
+		// apply colormap to visible mat
 		gocv.ApplyColorMap(topBGR, &topBGR, gocv.ColormapTypes(userColorMaps[o.currentColorMap]))
+		// resize mat to o.scale
 		gocv.Resize(topBGR, &topBGR, image.Point{X: t.width * o.scale, Y: t.height * o.scale}, 0, 0, gocv.InterpolationCubic)
+		// resize window to mat size
 		window.ResizeWindow(t.width*o.scale, t.height*o.scale)
+		// draw crosshair and temp
 		if o.crosshair {
 			// draw crosshair
+			// H
 			gocv.Line(&topBGR, image.Point{X: ((t.width / 2) - o.crosshairSize) * o.scale, Y: (t.height / 2) * o.scale}, image.Point{X: ((t.width / 2) + o.crosshairSize) * o.scale, Y: (t.height / 2) * o.scale}, elementColors["black"], 2)
 			gocv.Line(&topBGR, image.Point{X: ((t.width / 2) - o.crosshairSize) * o.scale, Y: (t.height / 2) * o.scale}, image.Point{X: ((t.width / 2) + o.crosshairSize) * o.scale, Y: (t.height / 2) * o.scale}, elementColors[o.currentElementColor], 1)
-
+			// V
 			gocv.Line(&topBGR, image.Point{X: (t.width / 2) * o.scale, Y: ((t.height / 2) - o.crosshairSize) * o.scale}, image.Point{X: (t.width / 2) * o.scale, Y: ((t.height / 2) + o.crosshairSize) * o.scale}, elementColors["black"], 2)
 			gocv.Line(&topBGR, image.Point{X: (t.width / 2) * o.scale, Y: ((t.height / 2) - o.crosshairSize) * o.scale}, image.Point{X: (t.width / 2) * o.scale, Y: ((t.height / 2) + o.crosshairSize) * o.scale}, elementColors[o.currentElementColor], 1)
 			// get temp at center
-			centerTemp := t.getTempAt(t.width/2, t.height/2, o.tempConv)
+			var centerTemp string
+			if testAvgTemp {
+				centerTemp = t.getAvgTempAt(t.width/2, t.height/2, o.tempConv)
+			} else {
+				centerTemp = t.getTempAt(t.width/2, t.height/2, o.tempConv)
+			}
 			// show temp
 			gocv.PutText(&topBGR, centerTemp, image.Point{X: 2, Y: (t.height * o.scale) - 2}, o.font, o.fontScale, elementColors["black"], fontShadow)
 			gocv.PutText(&topBGR, centerTemp, image.Point{X: 2, Y: (t.height * o.scale) - 2}, o.font, o.fontScale, elementColors[o.currentElementColor], 1)
 		}
+		// draw high low points within padded zone
 		if o.highLowToggle {
 			// get high low cords
 			lX, lY, hX, hY := t.getHighLow(o)
@@ -150,7 +175,12 @@ func (t *Thermal) start(o *Opts) {
 			gocv.Circle(&topBGR, image.Point{X: lY * o.scale, Y: lX * o.scale}, 2, elementColors["white"], 2)
 			gocv.Circle(&topBGR, image.Point{X: lY * o.scale, Y: lX * o.scale}, 1, elementColors["blue"], 2)
 			// get low temp
-			lowestTemp := t.getTempAt(lY, lX, o.tempConv)
+			var lowestTemp string
+			if testAvgTemp {
+				lowestTemp = t.getAvgTempAt(lY, lX, o.tempConv)
+			} else {
+				lowestTemp = t.getTempAt(lY, lX, o.tempConv)
+			}
 			// show lowest temp text
 			gocv.PutText(&topBGR, lowestTemp, image.Point{X: (lY * o.scale) + 4, Y: (lX * o.scale) + 2}, o.font, o.fontScale, elementColors["black"], fontShadow)
 			gocv.PutText(&topBGR, lowestTemp, image.Point{X: (lY * o.scale) + 4, Y: (lX * o.scale) + 2}, o.font, o.fontScale, elementColors[o.currentElementColor], 1)
@@ -158,11 +188,21 @@ func (t *Thermal) start(o *Opts) {
 			gocv.Circle(&topBGR, image.Point{X: hY * o.scale, Y: hX * o.scale}, 2, elementColors["white"], 2)
 			gocv.Circle(&topBGR, image.Point{X: hY * o.scale, Y: hX * o.scale}, 1, elementColors["red"], 2)
 			// get high temp
-			highestTemp := t.getTempAt(hY, hX, o.tempConv)
+			var highestTemp string
+			if testAvgTemp {
+				highestTemp = t.getAvgTempAt(hY, hX, o.tempConv)
+			} else {
+				highestTemp = t.getTempAt(hY, hX, o.tempConv)
+			}
 			// show highest temp text
 			gocv.PutText(&topBGR, highestTemp, image.Point{X: (hY * o.scale) + 4, Y: (hX * o.scale) + 2}, o.font, o.fontScale, elementColors["black"], fontShadow)
 			gocv.PutText(&topBGR, highestTemp, image.Point{X: (hY * o.scale) + 4, Y: (hX * o.scale) + 2}, o.font, o.fontScale, elementColors[o.currentElementColor], 1)
 		}
+		// close thermal mat
+		if err := t.thermalMat.Close(); err != nil {
+			log.Printf("error closing thermal mat: %v", err)
+		}
+		// show program info
 		if o.info {
 			// draw thermal search area rect
 			gocv.Rectangle(&topBGR, image.Rect(o.thermalPadding*o.scale, o.thermalPadding*o.scale, (t.width-o.thermalPadding)*o.scale, (t.height-o.thermalPadding)*o.scale), elementColors[o.currentElementColor], 1)
@@ -176,16 +216,26 @@ func (t *Thermal) start(o *Opts) {
 			gocv.PutText(&topBGR, fontScaleText, image.Point{X: 2, Y: 30}, o.font, o.fontScale, elementColors[o.currentElementColor], 1)
 
 		}
+		// if recording draw elapsed time and write topBGR mat to t.videoWriter
 		if t.recording {
+			// get time elapsed since recording started
 			elapsed := time.Since(t.recTime)
+			// draw elapsed text
 			elapsedText := fmt.Sprintf("REC:%02d:%02d:%02d", int(elapsed.Hours()), int(elapsed.Minutes())%60, int(elapsed.Seconds())%60)
 			gocv.PutText(&topBGR, elapsedText, image.Point{X: (t.width * o.scale) / 2, Y: 10}, o.font, o.fontScale, elementColors["black"], fontShadow)
 			gocv.PutText(&topBGR, elapsedText, image.Point{X: (t.width * o.scale) / 2, Y: 10}, o.font, o.fontScale, elementColors[o.currentElementColor], 1)
+			// write topBGR to t.videoWriter
 			if err := t.videoWriter.Write(topBGR); err != nil {
 				log.Printf("Error writing image data: %v", err)
 			}
 		}
+		// display topBRG mat
 		window.IMShow(topBGR)
+		// close topBGR mat
+		if topBGR.Close() != nil {
+			log.Printf("Error closing window: %v", topBGR.Close())
+		}
+		// process key presses
 		ww := window.WaitKey(1) // ascii keycode // https://www.ascii-code.com/
 		if ww > -1 {
 			switch ww {
@@ -201,12 +251,15 @@ func (t *Thermal) start(o *Opts) {
 				}
 				o.currentColormapLabel = colormaps[userColorMaps[o.currentColorMap]]
 			case 104: // h
+				// flip o.highLowToggle
 				o.highLowToggle = !o.highLowToggle
 			case 120: // x
+				// changing scale during recording crashes program
 				if !t.recording {
 					o.scale++
 				}
 			case 122: // z
+				// changing scale during recording crashes program
 				if o.scale > 1 && !t.recording {
 					o.scale--
 				}
@@ -316,6 +369,7 @@ func main() {
 		o.colorKeys = append(o.colorKeys, k)
 	}
 	flag.IntVar(&t.device, "d", 0, "Device ID")
+	flag.BoolVar(&testAvgTemp, "a", false, "Test avg temperature(will cause segfaults, lol)")
 	flag.Parse()
 	t.start(o)
 }
