@@ -24,7 +24,7 @@ var (
 	colormaps     = map[int]string{0: "AUTUMN", 1: "BONE", 2: "JET", 3: "WINTER", 4: "RAINBOW", 5: "OCEAN", 6: "SUMMER", 7: "SPRING", 8: "COOL", 9: "HSV", 10: "PINK", 11: "HOT", 12: "PARULA", 13: "MAGMA", 14: "INFERNO", 15: "PLASMA", 16: "VIRIDIS", 17: "CIVIDIS", 18: "TWILIGHT", 19: "TWILIGHT_SHIFTED", 20: "TURBO", 21: "DEEPGREEN"}
 	userColorMaps = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21} // customize colormaps here
 	//userColorMaps = []int{1, 20, 21, 19, 17} // my colormaps
-	fontShadow  = 3
+	fontShadow  = 4
 	testAvgTemp bool
 )
 
@@ -82,7 +82,7 @@ func (t *Thermal) getAvgTempAt(x, y int, conv bool) string {
 	// avg of both channel gives the correct temp
 	// but causes random seg faults when reading temp
 	// and instant seg fault when reading temp and video recording starts, fun!!!
-	st0 := t.thermalMat.GetShortAt(y, x) // causes seg fault
+	st0 := t.thermalMat.GetShortAt(y, x)     // causes seg fault
 	st1 := t.thermalMat.GetShortAt3(y, x, 1) // causes seg fault
 	stAvg := (float64(st0) + float64(st1)) / 2
 	cTemp := (stAvg / 64) - 273.15
@@ -102,6 +102,7 @@ func (t *Thermal) getTempAt(x, y int, conv bool) string {
 }
 
 func (t *Thermal) start(o *Opts) {
+	takeImage := false
 	webcam, err := gocv.OpenVideoCapture(t.device)
 	if err != nil {
 		fmt.Printf("error opening video capture device: %v\n", t.device)
@@ -109,11 +110,14 @@ func (t *Thermal) start(o *Opts) {
 	}
 	defer webcam.Close()
 	webcam.Set(gocv.VideoCaptureFPS, t.fps)
-	webcam.Set(gocv.VideoCaptureConvertRGB, 0) // do not convert format
+	// do not convert format, format is 1x196608 1 channel mat
+	webcam.Set(gocv.VideoCaptureConvertRGB, 0)
+	// create a window
 	window := gocv.NewWindow("Thermal")
 	defer window.Close()
 	img := gocv.NewMat()
 	defer img.Close()
+	// resize window to init scale
 	window.ResizeWindow(t.width*o.scale, t.height*o.scale)
 	for {
 		if ok := webcam.Read(&img); !ok {
@@ -231,6 +235,13 @@ func (t *Thermal) start(o *Opts) {
 		}
 		// display topBRG mat
 		window.IMShow(topBGR)
+		// save mat as image
+		if takeImage {
+			takeImage = false
+			imageFilename := fmt.Sprintf("Thermal-%s.png", strings.Replace(time.Now().Format(time.Stamp), " ", "_", -1))
+			fmt.Printf("Saving image: %v\n", imageFilename)
+			gocv.IMWrite(imageFilename, topBGR)
+		}
 		// close topBGR mat
 		if topBGR.Close() != nil {
 			log.Printf("Error closing window: %v", topBGR.Close())
@@ -264,9 +275,7 @@ func (t *Thermal) start(o *Opts) {
 					o.scale--
 				}
 			case 112: // p
-				imageFilename := fmt.Sprintf("Thermal-%s.png", strings.Replace(time.Now().Format(time.Stamp), " ", "_", -1))
-				fmt.Printf("Saving image: %v\n", imageFilename)
-				gocv.IMWrite(imageFilename, topBGR)
+				takeImage = true
 			case 114: // r
 				if !t.recording {
 					videoFilename := fmt.Sprintf("Thermal-%s.avi", strings.Replace(time.Now().Format(time.Stamp), " ", "_", -1))
