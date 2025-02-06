@@ -1,4 +1,4 @@
-module awesomeProject
+module goThermalCamera
 
 go 1.23
 
